@@ -1,0 +1,294 @@
+-- Fly Mobile (LocalScript)
+-- Colocar em StarterPlayer -> StarterPlayerScripts (LocalScript)
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+
+local player = Players.LocalPlayer
+local guiParent = player:WaitForChild("PlayerGui")
+
+-- Configurações
+local SPEED = 60            -- velocidade de deslocamento horizontal
+local ASCEND_SPEED = 40     -- velocidade vertical ao subir/descer
+local SMOOTHNESS = 0.15     -- suavidade do movimento (0 a 1)
+local JOYSTICK_RADIUS = 60  -- raio do joystick
+local BUTTON_SIZE = UDim2.new(0, 72, 0, 72)
+
+-- Estados
+local flying = false
+local moveVector = Vector3.new(0,0,0)
+local verticalVelocity = 0
+
+-- Função para criar UI (cria ScreenGui se não existir)
+local function createUI()
+    local screenGui = guiParent:FindFirstChild("FlyMobileGUI")
+    if screenGui then return screenGui end
+
+    screenGui = Instance.new("ScreenGui")
+    screenGui.Name = "FlyMobileGUI"
+    screenGui.ResetOnSpawn = false
+    screenGui.Parent = guiParent
+
+    -- Joystick container (esq inferior)
+    local joyContainer = Instance.new("Frame")
+    joyContainer.Name = "JoyContainer"
+    joyContainer.AnchorPoint = Vector2.new(0,1)
+    joyContainer.Position = UDim2.new(0, 0, 1, -120)
+    joyContainer.Size = UDim2.new(0, 140, 0, 140)
+    joyContainer.BackgroundTransparency = 1
+    joyContainer.Parent = screenGui
+
+    local joystickBg = Instance.new("Frame")
+    joystickBg.Name = "JoyBg"
+    joystickBg.Size = UDim2.new(0, JOYSTICK_RADIUS*2, 0, JOYSTICK_RADIUS*2)
+    joystickBg.Position = UDim2.new(0, 0, 0, 0)
+    joystickBg.BackgroundTransparency = 0.6
+    joystickBg.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+    joystickBg.BorderSizePixel = 0
+    joystickBg.Parent = joyContainer
+    joystickBg.AnchorPoint = Vector2.new(0,0)
+
+    local thumb = Instance.new("Frame")
+    thumb.Name = "Thumb"
+    thumb.Size = UDim2.new(0, JOYSTICK_RADIUS, 0, JOYSTICK_RADIUS)
+    thumb.Position = UDim2.new(0, JOYSTICK_RADIUS/2, 0, JOYSTICK_RADIUS/2)
+    thumb.BackgroundTransparency = 0.3
+    thumb.BackgroundColor3 = Color3.fromRGB(200,200,200)
+    thumb.BorderSizePixel = 0
+    thumb.AnchorPoint = Vector2.new(0,0)
+    thumb.Parent = joystickBg
+    thumb.Position = UDim2.new(0.5, -JOYSTICK_RADIUS/2, 0.5, -JOYSTICK_RADIUS/2)
+
+    -- Fly toggle button (dir inferior)
+    local flyBtn = Instance.new("TextButton")
+    flyBtn.Name = "FlyButton"
+    flyBtn.AnchorPoint = Vector2.new(1,1)
+    flyBtn.Position = UDim2.new(1, -20, 1, -20)
+    flyBtn.Size = BUTTON_SIZE
+    flyBtn.Text = "Fly"
+    flyBtn.Font = Enum.Font.SourceSansBold
+    flyBtn.TextSize = 22
+    flyBtn.BackgroundTransparency = 0.05
+    flyBtn.BackgroundColor3 = Color3.fromRGB(30,30,30)
+    flyBtn.TextColor3 = Color3.fromRGB(255,255,255)
+    flyBtn.Parent = screenGui
+
+    -- Ascend/Descend buttons (acima do Fly)
+    local ascend = Instance.new("TextButton")
+    ascend.Name = "Ascend"
+    ascend.AnchorPoint = Vector2.new(1,1)
+    ascend.Position = UDim2.new(1, -20 - BUTTON_SIZE.X.Offset - 8, 1, -20)
+    ascend.Size = BUTTON_SIZE
+    ascend.Text = "▲"
+    ascend.Font = Enum.Font.SourceSansBold
+    ascend.TextSize = 28
+    ascend.Parent = screenGui
+
+    local descend = Instance.new("TextButton")
+    descend.Name = "Descend"
+    descend.AnchorPoint = Vector2.new(1,1)
+    descend.Position = UDim2.new(1, -20 - BUTTON_SIZE.X.Offset - 8, 1, -20 - BUTTON_SIZE.Y.Offset - 8)
+    descend.Size = BUTTON_SIZE
+    descend.Text = "▼"
+    descend.Font = Enum.Font.SourceSansBold
+    descend.TextSize = 28
+    descend.Parent = screenGui
+
+    return screenGui
+end
+
+local screenGui = createUI()
+local joyBg = screenGui.JoyContainer.JoyBg
+local thumb = joyBg.Thumb
+local flyBtn = screenGui.FlyButton
+local ascendBtn = screenGui.Ascend
+local descendBtn = screenGui.Descend
+
+-- Joystick touch handling
+local activeTouch = nil
+local centerPos = Vector2.new(joyBg.AbsolutePosition.X + joyBg.AbsoluteSize.X/2, joyBg.AbsolutePosition.Y + joyBg.AbsoluteSize.Y/2)
+
+local function updateCenter()
+    centerPos = Vector2.new(joyBg.AbsolutePosition.X + joyBg.AbsoluteSize.X/2, joyBg.AbsolutePosition.Y + joyBg.AbsoluteSize.Y/2)
+end
+joyBg:GetPropertyChangedSignal("AbsolutePosition"):Connect(updateCenter)
+joyBg:GetPropertyChangedSignal("AbsoluteSize"):Connect(updateCenter)
+
+local function clampVector(vec, maxLen)
+    local len = vec.Magnitude
+    if len > maxLen then
+        return vec.Unit * maxLen
+    else
+        return vec
+    end
+end
+
+local function onTouchInputChanged(input, gpe)
+    if input.UserInputType ~= Enum.UserInputType.Touch then return end
+    if not activeTouch then return end
+    if input.TouchId ~= activeTouch.TouchId then return end
+
+    local pos = Vector2.new(input.Position.X, input.Position.Y)
+    local delta = pos - centerPos
+    local clamped = clampVector(delta, JOYSTICK_RADIUS)
+    local thumbPos = UDim2.new(0, clamped.X + JOYSTICK_RADIUS, 0, clamped.Y + JOYSTICK_RADIUS)
+    thumb.Position = UDim2.new(0, thumbPos.X.Offset - thumb.Size.X.Offset/2, 0, thumbPos.Y.Offset - thumb.Size.Y.Offset/2)
+
+    -- Normalized move vector (X,Z)
+    local nx = clamped.X / JOYSTICK_RADIUS
+    local nz = clamped.Y / JOYSTICK_RADIUS
+    -- Convert screen Y (down positive) to world Z (forward negative/positive depending on camera) later
+    moveVector = Vector3.new(nx, 0, nz)
+end
+
+local function onTouchEnded(input, gpe)
+    if input.UserInputType ~= Enum.UserInputType.Touch then return end
+    if not activeTouch then return end
+    if input.TouchId ~= activeTouch.TouchId then return end
+    activeTouch = nil
+    moveVector = Vector3.new(0,0,0)
+    -- reset thumb
+    thumb.Position = UDim2.new(0.5, -JOYSTICK_RADIUS/2, 0.5, -JOYSTICK_RADIUS/2)
+end
+
+-- Start a touch on joystick
+joyBg.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.Touch then
+        activeTouch = input
+        onTouchInputChanged(input)
+    end
+end)
+
+joyBg.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.Touch then
+        onTouchInputChanged(input)
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.Touch then
+        onTouchInputChanged(input)
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+    onTouchEnded(input)
+end)
+
+-- Ascend/Descend buttons handling
+local ascendPressed, descendPressed = false, false
+ascendBtn.TouchTapEnd:Connect(function() end) -- compat
+ascendBtn.InputBegan:Connect(function(i) if i.UserInputType == Enum.UserInputType.Touch then ascendPressed = true end end)
+ascendBtn.InputEnded:Connect(function(i) if i.UserInputType == Enum.UserInputType.Touch then ascendPressed = false end end)
+descendBtn.InputBegan:Connect(function(i) if i.UserInputType == Enum.UserInputType.Touch then descendPressed = true end end)
+descendBtn.InputEnded:Connect(function(i) if i.UserInputType == Enum.UserInputType.Touch then descendPressed = false end end)
+
+-- Fly toggle
+flyBtn.MouseButton1Click:Connect(function()
+    flying = not flying
+    if flying then
+        flyBtn.Text = "Flying"
+        flyBtn.BackgroundColor3 = Color3.fromRGB(30,150,30)
+    else
+        flyBtn.Text = "Fly"
+        flyBtn.BackgroundColor3 = Color3.fromRGB(30,30,30)
+    end
+end)
+
+-- Função para habilitar/desabilitar componentes de voo no personagem
+local bodyVel, bodyGyro
+local function enableFlight(rootPart)
+    if not rootPart then return end
+    if bodyVel then bodyVel:Destroy() end
+    if bodyGyro then bodyGyro:Destroy() end
+
+    bodyVel = Instance.new("BodyVelocity")
+    bodyVel.Name = "Fly_BodyVelocity"
+    bodyVel.MaxForce = Vector3.new(1e5, 1e5, 1e5)
+    bodyVel.P = 1e4
+    bodyVel.Velocity = Vector3.new(0,0,0)
+    bodyVel.Parent = rootPart
+
+    bodyGyro = Instance.new("BodyGyro")
+    bodyGyro.Name = "Fly_BodyGyro"
+    bodyGyro.MaxTorque = Vector3.new(1e5, 1e5, 1e5)
+    bodyGyro.P = 4e3
+    bodyGyro.CFrame = rootPart.CFrame
+    bodyGyro.Parent = rootPart
+end
+
+local function disableFlight()
+    if bodyVel then bodyVel:Destroy(); bodyVel = nil end
+    if bodyGyro then bodyGyro:Destroy(); bodyGyro = nil end
+end
+
+-- Atualiza movimento a cada frame
+local lastVelocity = Vector3.new(0,0,0)
+RunService.RenderStepped:Connect(function(dt)
+    local char = player.Character
+    if not char then return end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    local humanoid = char:FindFirstChildOfClass("Humanoid")
+    if not hrp or not humanoid then return end
+
+    if flying then
+        -- garante que o humanoid não atrapalhe (opcional)
+        humanoid.PlatformStand = true
+        if not bodyVel or not bodyGyro then
+            enableFlight(hrp)
+        end
+
+        -- calcular direção baseada na câmera
+        local cam = workspace.CurrentCamera
+        local camCFrame = cam.CFrame
+        -- mover na direção da câmera (X e Z)
+        local forward = camCFrame.LookVector
+        local right = camCFrame.RightVector
+
+        -- input moveVector: x = left/right, z = up/down on joystick
+        -- mapear joystick Y (na tela) para Z world (forward/back)
+        local inputX = moveVector.X
+        local inputZ = -moveVector.Z -- inverter para que puxar pra cima avance
+
+        local horizontalVel = (right * inputX + forward * inputZ) * SPEED
+
+        -- vertical controle por botões
+        local targetY = 0
+        if ascendPressed then
+            targetY = ASCEND_SPEED
+        elseif descendPressed then
+            targetY = -ASCEND_SPEED
+        else
+            targetY = 0
+        end
+
+        -- Smooth na velocidade
+        local targetVel = Vector3.new(horizontalVel.X, targetY, horizontalVel.Z)
+        lastVelocity = lastVelocity:Lerp(targetVel, SMOOTHNESS)
+        if bodyVel then
+            bodyVel.Velocity = lastVelocity
+        end
+
+        -- manter orientação estável (girar com câmera)
+        if bodyGyro then
+            bodyGyro.CFrame = CFrame.new(hrp.Position, hrp.Position + Vector3.new(camCFrame.LookVector.X, 0, camCFrame.LookVector.Z))
+        end
+    else
+        -- desfazer voo
+        if humanoid.PlatformStand then humanoid.PlatformStand = false end
+        disableFlight()
+    end
+end)
+
+-- Garantir que se o character for trocado a UI continue funcionando
+player.CharacterAdded:Connect(function()
+    wait(0.3)
+    -- resetar estados
+    flying = false
+    flyBtn.Text = "Fly"
+    flyBtn.BackgroundColor3 = Color3.fromRGB(30,30,30)
+    moveVector = Vector3.new(0,0,0)
+    ascendPressed = false
+    descendPressed = false
+    disableFlight()
+end)
