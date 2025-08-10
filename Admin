@@ -1,0 +1,53 @@
+--// Serviços
+local Players = game:GetService("Players")
+local StarterGui = game:GetService("StarterGui")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+--// Criar ScreenGui
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "AdminUI"
+screenGui.Parent = playerGui
+screenGui.ResetOnSpawn = false
+
+--// Criar Frame Principal
+local mainFrame = Instance.new("Frame")
+mainFrame.Size = UDim2.new(0, 300, 0, 200)
+mainFrame.Position = UDim2.new(0.5, -150, 0.5, -100)
+mainFrame.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+mainFrame.BorderSizePixel = 0
+mainFrame.Parent = screenGui
+
+--// Título
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, 0, 0, 40)
+title.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+title.Text = "Painel Admin"
+title.TextColor3 = Color3.fromRGB(255, 255, 255)
+title.Font = Enum.Font.SourceSansBold
+title.TextSize = 20
+title.Parent = mainFrame
+
+--// Botão Fechar
+local closeBtn = Instance.new("TextButton")
+closeBtn.Size = UDim2.new(0, 80, 0, 30)
+closeBtn.Position = UDim2.new(1, -90, 0, 5)
+closeBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+closeBtn.Text = "Fechar"
+closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+closeBtn.Font = Enum.Font.SourceSansBold
+closeBtn.TextSize = 16
+closeBtn.Parent = mainFrame
+
+--// Função para fechar UI
+closeBtn.MouseButton1Click:Connect(function()
+    screenGui.Enabled = false
+end)
+
+--// Reabrir com comando no chat
+player.Chatted:Connect(function(msg)
+    if msg:lower() == "/admin" then
+        screenGui.Enabled = true
+    end
+end)
